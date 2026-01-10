@@ -30,7 +30,7 @@ func NewShardManager(dsns []string) (*ShardManager, error) {
 		db.SetMaxIdleConns(5)
 
 		conns = append(conns, db)
-		log.Printf("connected to shard %d", i)
+		log.Printf("connected to the shard %d", i)
 	}
 
 	return &ShardManager{shards: conns}, nil
