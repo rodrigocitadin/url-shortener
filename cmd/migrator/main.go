@@ -9,6 +9,8 @@ import (
 	"log"
 	"os"
 	"path"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,19 +70,28 @@ func runMigration(dsn, action string, dryRun bool) error {
 		return fmt.Errorf("ping db: %w", err)
 	}
 
-	// Golang-Migrate Setup
-	sourceDriver, _ := iofs.New(migrations.FS, "migrations")
-	dbDriver, _ := postgres.WithInstance(db, &postgres.Config{})
+	sourceDriver, err := iofs.New(migrations.FS, ".")
+	if err != nil {
+		return fmt.Errorf("error initializing source driver: %w", err)
+	}
+
+	dbDriver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		return fmt.Errorf("error initializing db driver: %w", err)
+	}
+
 	m, err := migrate.NewWithInstance("iofs", sourceDriver, "postgres", dbDriver)
 	if err != nil {
 		return fmt.Errorf("error creating migration instance: %w", err)
 	}
 	defer m.Close()
 
+	// 1. DRY RUN Logic
 	if dryRun {
 		return printNextMigrationSQL(m, action)
 	}
 
+	// 2. Real Execution Logic
 	log.Printf("Executing %s...", strings.ToUpper(action))
 	switch action {
 	case "up":
@@ -102,6 +113,7 @@ func runMigration(dsn, action string, dryRun bool) error {
 	return nil
 }
 
+// printNextMigrationSQL determines which file would be executed and prints its content
 func printNextMigrationSQL(m *migrate.Migrate, action string) error {
 	version, dirty, err := m.Version()
 
@@ -119,22 +131,10 @@ func printNextMigrationSQL(m *migrate.Migrate, action string) error {
 
 	log.Printf("Current Version: %d", version)
 
-	var targetVersion uint
-	switch action {
-	case "up":
-		targetVersion = version + 1
-	case "down":
-		if version == 0 {
-			log.Println("Already at version 0. Nothing to downgrade.")
-			return nil
-		}
-		targetVersion = version
-	}
-
-	filename, content, err := findMigrationFile(targetVersion, action)
+	filename, content, err := findMigrationFile(version, action)
 	if err != nil {
 		if action == "up" {
-			log.Println(" -> No subsequent migration (Up to date).")
+			log.Println(" -> No subsequent migration found (Up to date).")
 			return nil
 		}
 		return err
@@ -147,21 +147,57 @@ func printNextMigrationSQL(m *migrate.Migrate, action string) error {
 	return nil
 }
 
-func findMigrationFile(targetVersion uint, action string) (string, []byte, error) {
-	files, err := fs.ReadDir(migrations.FS, "migrations")
+// findMigrationFile scans the migrations folder looking for the target file
+// It supports Timestamps by listing all files and finding the next logical one.
+func findMigrationFile(currentVersion uint, action string) (string, []byte, error) {
+	files, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
 		return "", nil, err
 	}
 
+	type migrationFile struct {
+		Version  uint64
+		Name     string
+		Fullpath string
+	}
+
+	var validFiles []migrationFile
 	suffix := fmt.Sprintf(".%s.sql", action)
-	prefix := fmt.Sprintf("%06d", targetVersion)
 
 	for _, file := range files {
-		if strings.HasPrefix(file.Name(), prefix) && strings.HasSuffix(file.Name(), suffix) {
-			content, err := migrations.FS.ReadFile(path.Join("migrations", file.Name()))
-			return file.Name(), content, err
+		if strings.HasSuffix(file.Name(), suffix) {
+			parts := strings.Split(file.Name(), "_")
+			if len(parts) > 0 {
+				v, err := strconv.ParseUint(parts[0], 10, 64)
+				if err == nil {
+					validFiles = append(validFiles, migrationFile{
+						Version:  v,
+						Name:     file.Name(),
+						Fullpath: path.Join(".", file.Name()),
+					})
+				}
+			}
 		}
 	}
 
-	return "", nil, fmt.Errorf("migration file version %d not found", targetVersion)
+	sort.Slice(validFiles, func(i, j int) bool {
+		return validFiles[i].Version < validFiles[j].Version
+	})
+
+	for _, mf := range validFiles {
+		switch action {
+		case "up":
+			if mf.Version > uint64(currentVersion) {
+				content, err := migrations.FS.ReadFile(mf.Fullpath)
+				return mf.Name, content, err
+			}
+		case "down":
+			if mf.Version == uint64(currentVersion) {
+				content, err := migrations.FS.ReadFile(mf.Fullpath)
+				return mf.Name, content, err
+			}
+		}
+	}
+
+	return "", nil, fmt.Errorf("migration file not found for current version %d with action %s", currentVersion, action)
 }
