@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS urls (
+    id BIGSERIAL PRIMARY KEY,
+    shortcode VARCHAR(20) NOT NULL UNIQUE,
+    url TEXT NOT NULL,
+    accesses BIGINT NOT NULL DEFAULT 0 CHECK (accesses >= 0)
+);
