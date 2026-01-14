@@ -26,8 +26,7 @@ func NewUnitOfWork(sm *ShardManager) UnitOfWork {
 }
 
 func (f *unitOfWork) ExecuteTx(shardingKey string, fn func(Factory) error) error {
-	db := f.shardManager.GetShard(shardingKey)
-	return db.Transaction(func(tx *gorm.DB) error {
+	return f.db.Transaction(func(tx *gorm.DB) error {
 		txFactory := &factory{db: tx}
 		return fn(txFactory)
 	})
