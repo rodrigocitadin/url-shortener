@@ -27,12 +27,13 @@ func main() {
 	}
 
 	dsns := strings.Split(dsnsEnv, ",")
-	shardManager, err := repository.NewShardManager(dsns)
+
+	sm, err := repository.NewShardManager(dsns)
 	if err != nil {
 		panic(err)
 	}
 
-	urlRepository := repository.NewURLRepository(shardManager)
+	uow := repository.NewUnitOfWork(sm)
 
 	//
 	// routes and API things
@@ -47,7 +48,7 @@ func main() {
 			return c.String(http.StatusBadRequest, err.Error())
 		}
 
-		err = urlRepository.Save(url.Shortcode, url.URL)
+		err = uow.URLS(url.Shortcode).Save(url.Shortcode, url.URL)
 		if err != nil {
 			return c.String(http.StatusBadRequest, err.Error())
 		}
@@ -62,7 +63,7 @@ func main() {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid shortcode param to store")
 		}
 
-		url, err := urlRepository.Find(shortcode)
+		url, err := uow.URLS(shortcode).Find(shortcode)
 		if err != nil {
 			return c.String(http.StatusBadRequest, err.Error())
 		}

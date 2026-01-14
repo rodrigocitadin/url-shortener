@@ -26,7 +26,8 @@ func NewUnitOfWork(sm *ShardManager) UnitOfWork {
 }
 
 func (f *unitOfWork) ExecuteTx(shardingKey string, fn func(Factory) error) error {
-	return f.db.Transaction(func(tx *gorm.DB) error {
+	db := f.shardManager.GetShard(shardingKey)
+	return db.Transaction(func(tx *gorm.DB) error {
 		txFactory := &factory{db: tx}
 		return fn(txFactory)
 	})
@@ -38,6 +39,5 @@ func (f *unitOfWork) URLS(shardingKey string) *URLRepository {
 }
 
 func (f *factory) URLS(shardingKey string) *URLRepository {
-	db := f.shardManager.GetShard(shardingKey)
-	return NewURLRepository(db)
+	return NewURLRepository(f.db)
 }
