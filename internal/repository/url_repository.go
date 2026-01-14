@@ -1,6 +1,9 @@
 package repository
 
-import "gorm.io/gorm"
+import (
+	"github.com/rodrigocitadin/url-shortener/internal/entities"
+	"gorm.io/gorm"
+)
 
 type URLRepository struct {
 	db *gorm.DB
@@ -10,17 +13,12 @@ func NewURLRepository(db *gorm.DB) *URLRepository {
 	return &URLRepository{db: db}
 }
 
-func (r *URLRepository) Save(shortCode, originalURL string) error {
-	query := `INSERT INTO urls (shortcode, url) VALUES (?, ?)`
-	err := r.db.Raw(query, shortCode, originalURL).Error
-
-	return err
+func (r *URLRepository) Save(urlEntity *entities.URLEntity) error {
+	return r.db.Create(&urlEntity).Error
 }
 
-func (r *URLRepository) Find(shortCode string) (string, error) {
-	var originalURL string
-	query := `SELECT url FROM urls WHERE shortcode = ?`
-
-	err := r.db.Raw(query, shortCode).Scan(&originalURL).Error
-	return originalURL, err
+func (r *URLRepository) Find(shortCode string) (*entities.URLEntity, error) {
+	var urlEntity entities.URLEntity
+	err := r.db.Find(&urlEntity, "shortcode = ?", shortCode).Error
+	return &urlEntity, err
 }

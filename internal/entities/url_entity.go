@@ -6,3 +6,7 @@ type URLEntity struct {
 	URL       string
 	Accesses  int64
 }
+
+func (URLEntity) TableName() string {
+	return "urls"
+}

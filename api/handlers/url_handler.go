@@ -8,35 +8,44 @@ import (
 	"github.com/rodrigocitadin/url-shortener/internal/services"
 )
 
-type URLHandler struct {
+type URLHandler interface {
+	GetFullURL(e echo.Context) error
+	StoreFullURL(e echo.Context) error
+}
+
+type urlHandler struct {
 	URLService services.URLService
 }
 
-func (h *URLHandler) GetFullURL(c echo.Context) error {
+func (h *urlHandler) GetFullURL(e echo.Context) error {
 	var req dtos.GetUrlRequest
-	if err := c.Bind(&req); err != nil {
+	if err := e.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid shortcode param to store")
 	}
 
 	url, err := h.URLService.Get(req.Shortcode)
 	if err != nil {
-		return c.String(http.StatusBadRequest, err.Error())
+		return e.String(http.StatusBadRequest, err.Error())
 	}
 
-	return c.Redirect(http.StatusMovedPermanently, url.URL)
+	return e.Redirect(http.StatusMovedPermanently, url.URL)
 }
 
-func (h *URLHandler) StoreFullURL(c echo.Context) error {
+func (h *urlHandler) StoreFullURL(e echo.Context) error {
 	var req dtos.StoreUrlRequest
-	err := c.Bind(&req)
+	err := e.Bind(&req)
 	if err != nil {
-		return c.String(http.StatusBadRequest, err.Error())
+		return e.String(http.StatusBadRequest, err.Error())
 	}
 
-	err = h.URLService.Store(req.Shortcode, req.URL)
+	err = h.URLService.Store(req.URL, req.Shortcode)
 	if err != nil {
-		return c.String(http.StatusBadRequest, err.Error())
+		return e.String(http.StatusBadRequest, err.Error())
 	}
 
-	return c.NoContent(http.StatusCreated)
+	return e.NoContent(http.StatusCreated)
+}
+
+func NewURLHandler(urlService services.URLService) URLHandler {
+	return &urlHandler{URLService: urlService}
 }
