@@ -1,14 +1,18 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/rodrigocitadin/url-shortener/internal/repository"
 )
 
 type CreateUrlRequest struct {
-	URL      string `json:"url"`
-	ShortURL string `json:"short"`
+	URL       string `json:"url"`
+	Shortcode string `json:"shortcode"`
 }
 
 type UpdateUrlRequest struct {
@@ -17,61 +21,56 @@ type UpdateUrlRequest struct {
 }
 
 func main() {
+	dsnsEnv := os.Getenv("SHARD_DSNS")
+	if dsnsEnv == "" {
+		panic("SHARD_DSNS env not defined")
+	}
+
+	dsns := strings.Split(dsnsEnv, ",")
+	shardManager, err := repository.NewShardManager(dsns)
+	if err != nil {
+		panic(err)
+	}
+
+	urlRepository := repository.NewURLRepository(shardManager)
+
+	//
+	// routes and API things
+	//
+
 	e := echo.New()
 
 	e.POST("/", func(c echo.Context) error {
-		panic("Not implemented yet")
-	})
-
-	e.PUT("/:shorturl", func(c echo.Context) error {
-		shorturl, err := verifyUrlParam(c, "shorturl")
+		var url CreateUrlRequest
+		err := c.Bind(&url)
 		if err != nil {
-			return err
+			return c.String(http.StatusBadRequest, err.Error())
 		}
 
-		_ = shorturl
-
-		panic("Not implemented yet")
-	})
-
-	e.DELETE("/:shorturl", func(c echo.Context) error {
-		shorturl, err := verifyUrlParam(c, "shorturl")
+		err = urlRepository.Save(url.Shortcode, url.URL)
 		if err != nil {
-			return err
+			return c.String(http.StatusBadRequest, err.Error())
 		}
 
-		_ = shorturl
-
-		panic("Not implemented yet")
+		return c.NoContent(http.StatusCreated)
 	})
 
 	// redirect route
-	e.GET("/:shorturl", func(c echo.Context) error {
-		shorturl, err := verifyUrlParam(c, "shorturl")
+	e.GET("/:shortcode", func(c echo.Context) error {
+		shortcode := c.Param("shortcode")
+		if shortcode == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid shortcode param to store")
+		}
+
+		url, err := urlRepository.Find(shortcode)
 		if err != nil {
-			return err
+			return c.String(http.StatusBadRequest, err.Error())
 		}
 
-		// logic to find the requested shorturl
-		_ = shorturl
-		url := ""
-
-		if url == "" {
-			return c.String(http.StatusNotFound, "url not found")
-		}
+		fmt.Printf("%+v", url)
 
 		return c.Redirect(http.StatusMovedPermanently, url)
 	})
 
 	e.Logger.Fatal(e.Start(":3030"))
-}
-
-func verifyUrlParam(c echo.Context, param string) (string, error) {
-	urlParam := c.Param(param)
-	if urlParam == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "invalid url param to store")
-	}
-
-	return urlParam, nil
-
 }
