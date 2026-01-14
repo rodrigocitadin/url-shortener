@@ -10,16 +10,6 @@ import (
 	"github.com/rodrigocitadin/url-shortener/internal/repository"
 )
 
-type CreateUrlRequest struct {
-	URL       string `json:"url"`
-	Shortcode string `json:"shortcode"`
-}
-
-type UpdateUrlRequest struct {
-	NewURL      string `json:"url,omitempty"`
-	NewShortURL string `json:"short,omitempty"`
-}
-
 func main() {
 	dsnsEnv := os.Getenv("SHARD_DSNS")
 	if dsnsEnv == "" {
