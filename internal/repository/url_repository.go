@@ -1,28 +1,26 @@
 package repository
 
+import "gorm.io/gorm"
+
 type URLRepository struct {
-	sharder *ShardManager
+	db *gorm.DB
 }
 
-func NewURLRepository(sharder *ShardManager) *URLRepository {
-	return &URLRepository{sharder: sharder}
+func NewURLRepository(db *gorm.DB) *URLRepository {
+	return &URLRepository{db: db}
 }
 
 func (r *URLRepository) Save(shortCode, originalURL string) error {
-	db := r.sharder.GetShard(shortCode)
-
-	query := `INSERT INTO urls (shortcode, url) VALUES ($1, $2)`
-	_, err := db.Exec(query, shortCode, originalURL)
+	query := `INSERT INTO urls (shortcode, url) VALUES (?, ?)`
+	err := r.db.Raw(query, shortCode, originalURL).Error
 
 	return err
 }
 
 func (r *URLRepository) Find(shortCode string) (string, error) {
-	db := r.sharder.GetShard(shortCode)
-
 	var originalURL string
-	query := `SELECT url FROM urls WHERE shortcode = $1`
+	query := `SELECT url FROM urls WHERE shortcode = ?`
 
-	err := db.QueryRow(query, shortCode).Scan(&originalURL)
+	err := r.db.Raw(query, shortCode).Scan(&originalURL).Error
 	return originalURL, err
 }

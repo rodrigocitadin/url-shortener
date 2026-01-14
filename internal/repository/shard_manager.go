@@ -1,42 +1,47 @@
 package repository
 
 import (
-	"database/sql"
 	"fmt"
 	"hash/fnv"
 	"log"
 
-	_ "github.com/lib/pq"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 type ShardManager struct {
-	shards []*sql.DB // Slice of connections: [db0, db1, db2]
+	shards []*gorm.DB
 }
 
 func NewShardManager(dsns []string) (*ShardManager, error) {
-	var conns []*sql.DB
+	var conns []*gorm.DB
 
 	for i, dsn := range dsns {
-		db, err := sql.Open("postgres", dsn)
+		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		if err != nil {
-			return nil, fmt.Errorf("failed to connect to the shard %d: %w", i, err)
+			return nil, fmt.Errorf("failed to connect to shard %d: %w", i, err)
 		}
 
-		if err := db.Ping(); err != nil {
-			return nil, fmt.Errorf("shard %d unreacheble: %w", i, err)
+		sqlDB, err := db.DB()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get sql.DB from shard %d: %w", i, err)
 		}
 
-		db.SetMaxOpenConns(10)
-		db.SetMaxIdleConns(5)
+		if err := sqlDB.Ping(); err != nil {
+			return nil, fmt.Errorf("shard %d unreachable: %w", i, err)
+		}
+
+		sqlDB.SetMaxOpenConns(10)
+		sqlDB.SetMaxIdleConns(5)
 
 		conns = append(conns, db)
-		log.Printf("connected to the shard %d", i)
+		log.Printf("connected to shard %d (GORM)", i)
 	}
 
 	return &ShardManager{shards: conns}, nil
 }
 
-func (sm *ShardManager) GetShard(key string) *sql.DB {
+func (sm *ShardManager) GetShard(key string) *gorm.DB {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	hashValue := h.Sum32()
