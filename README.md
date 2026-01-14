@@ -3,7 +3,7 @@
 Main goals:
 
 - [ ] multiple backends
-- [ ] sharded database
+- [x] sharded database
 - [ ] k8s managing everything
 - [ ] one redis for cache
 - [ ] traefik for load balancing
