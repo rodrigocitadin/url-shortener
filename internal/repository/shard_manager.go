@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type ShardManager struct {
@@ -17,7 +18,9 @@ func NewShardManager(dsns []string) (*ShardManager, error) {
 	var conns []*gorm.DB
 
 	for i, dsn := range dsns {
-		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+			Logger: logger.Default.LogMode(logger.Silent),
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to shard %d: %w", i, err)
 		}

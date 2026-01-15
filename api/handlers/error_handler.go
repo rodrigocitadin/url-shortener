@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 
@@ -10,10 +9,11 @@ import (
 )
 
 func HTTPErrorHandler(err error, c echo.Context) {
-	reqID := c.Response().Header().Get(echo.HeaderXRequestID)
-	if reqID == "" {
-		reqID = "unknown"
+	if c.Response().Committed {
+		return
 	}
+
+	reqID := c.Response().Header().Get(echo.HeaderXRequestID)
 
 	code := http.StatusInternalServerError
 	response := &errors.Error{
@@ -28,27 +28,19 @@ func HTTPErrorHandler(err error, c echo.Context) {
 	} else if echoErr, ok := err.(*echo.HTTPError); ok {
 		code = echoErr.Code
 		response.Code = code
-		response.Message = fmt.Sprintf("%v", echoErr.Message)
+		response.Message = echoErr.Message.(string)
 		response.Layer = "framework"
 	} else {
 		response.Internal = err
-		response.Layer = "unhandled"
 	}
 
-	if response.Internal != nil {
-		log.Printf("[%s] Critial error [%s]: %s | Root Cause: %v", reqID, response.Layer, response.Message, response.Internal)
+	if code >= 500 {
+		log.Printf("[%s] CRITICAL [%s]: %s | Root Cause: %v", reqID, response.Layer, response.Message, response.Internal)
 	} else {
-		log.Printf("[%s] Error [%s]: %s", reqID, response.Layer, response.Message)
+		log.Printf("[%s] INFO [%s]: %s", reqID, response.Layer, response.Message)
 	}
 
-	if !c.Response().Committed {
-		if c.Request().Method == http.MethodHead {
-			err = c.NoContent(code)
-		} else {
-			err = c.JSON(code, response)
-		}
-		if err != nil {
-			log.Printf("[%s] Error sending the Error JSON: %v", reqID, err)
-		}
+	if err := c.JSON(code, response); err != nil {
+		log.Printf("[%s] Error sending JSON: %v", reqID, err)
 	}
 }

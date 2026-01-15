@@ -61,10 +61,12 @@ func main() {
 	//
 
 	e := echo.New()
+	e.HideBanner = true
+	e.HTTPErrorHandler = handlers.HTTPErrorHandler
+
 	e.Use(middleware.RequestID())
 	e.Use(middleware.RequestLoggerWithConfig(loggerConfig))
 	e.Use(middleware.Recover())
-	e.HTTPErrorHandler = handlers.HTTPErrorHandler
 
 	api.Router(e, serviceChain)
 

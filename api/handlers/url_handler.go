@@ -25,7 +25,7 @@ func (h *urlHandler) GetFullURL(e echo.Context) error {
 
 	url, err := h.URLService.Get(req.Shortcode)
 	if err != nil {
-		return e.String(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	return e.Redirect(http.StatusMovedPermanently, url.URL)
@@ -35,12 +35,12 @@ func (h *urlHandler) StoreFullURL(e echo.Context) error {
 	var req dtos.StoreUrlRequest
 	err := e.Bind(&req)
 	if err != nil {
-		return e.String(http.StatusBadRequest, err.Error())
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	err = h.URLService.Store(req.URL, req.Shortcode)
 	if err != nil {
-		return e.String(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	return e.NoContent(http.StatusCreated)
