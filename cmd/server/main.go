@@ -1,18 +1,19 @@
 package main
 
 import (
-	"log"
-	"os"
-	"strings"
-	"time"
-
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/redis/go-redis/v9"
 	"github.com/rodrigocitadin/url-shortener/api"
 	"github.com/rodrigocitadin/url-shortener/api/handlers"
 	"github.com/rodrigocitadin/url-shortener/internal/repository"
 	"github.com/rodrigocitadin/url-shortener/internal/services"
+	"log"
+	"os"
+	"strings"
+	"time"
 )
 
 var loggerConfig = middleware.RequestLoggerConfig{
@@ -60,7 +61,13 @@ func main() {
 		panic("redis initialization error")
 	}
 
-	uow := repository.NewUnitOfWork(sm, rdb)
+	amqpConn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	if err != nil {
+		log.Fatal("RabbitMQ connection error:", err)
+	}
+	defer amqpConn.Close()
+
+	uow := repository.NewUnitOfWork(sm, rdb, amqpConn)
 	urlService := services.NewURLService(uow)
 	serviceChain := api.ServiceChain{URLService: urlService}
 

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -17,6 +18,7 @@ type UnitOfWork interface {
 type unitOfWork struct {
 	shardManager *ShardManager
 	redisClient  *redis.Client
+	amqpConn     *amqp.Connection
 }
 
 type factory struct {
@@ -24,10 +26,11 @@ type factory struct {
 	db          *gorm.DB
 }
 
-func NewUnitOfWork(sm *ShardManager, rdb *redis.Client) UnitOfWork {
+func NewUnitOfWork(sm *ShardManager, rdb *redis.Client, amqpConn *amqp.Connection) UnitOfWork {
 	return &unitOfWork{
 		shardManager: sm,
 		redisClient:  rdb,
+		amqpConn:     amqpConn,
 	}
 }
 
@@ -44,11 +47,18 @@ func (f *unitOfWork) ExecuteTx(shardingKey string, fn func(Factory) error) error
 
 func (f *unitOfWork) URLS(shardingKey string) URLRepository {
 	db := f.shardManager.GetShard(shardingKey)
-	pgRepo := NewPostgresURLRepository(db)
-	return NewCachedURLRepository(pgRepo, f.redisClient)
+	pgRepo := NewDatabaseURLRepository(db)
+
+	var finalRepo URLRepository = pgRepo
+	if f.amqpConn != nil {
+		ch, _ := f.amqpConn.Channel()
+		finalRepo = NewQueueURLRepository(ch, pgRepo)
+	}
+
+	return NewCachedURLRepository(finalRepo, f.redisClient)
 }
 
 func (f *factory) URLS(shardingKey string) URLRepository {
-	pgRepo := NewPostgresURLRepository(f.db)
+	pgRepo := NewDatabaseURLRepository(f.db)
 	return NewCachedURLRepository(pgRepo, f.redisClient)
 }

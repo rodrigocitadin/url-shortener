@@ -66,6 +66,20 @@ services:
     networks:
       - url_shortener_net
 
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: url_shortener_rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - url_shortener_net
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
 volumes:
   pg_shard0_data:
   pg_shard1_data:

@@ -14,7 +14,7 @@ type urlRepository struct {
 	db *gorm.DB
 }
 
-func NewPostgresURLRepository(db *gorm.DB) URLRepository {
+func NewDatabaseURLRepository(db *gorm.DB) URLRepository {
 	return &urlRepository{db: db}
 }
 
