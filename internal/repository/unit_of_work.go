@@ -1,43 +1,54 @@
 package repository
 
-import "gorm.io/gorm"
+import (
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
+)
 
 type Factory interface {
-	URLS(shardingKey string) *URLRepository
+	URLS(shardingKey string) URLRepository
 }
 
 type UnitOfWork interface {
 	ExecuteTx(shardingKey string, fn func(Factory) error) error
-	URLS(shardingKey string) *URLRepository
+	URLS(shardingKey string) URLRepository
 }
 
 type unitOfWork struct {
 	shardManager *ShardManager
-	db           *gorm.DB
+	redisClient  *redis.Client
 }
 
 type factory struct {
-	shardManager *ShardManager
-	db           *gorm.DB
+	redisClient *redis.Client
+	db          *gorm.DB
 }
 
-func NewUnitOfWork(sm *ShardManager) UnitOfWork {
-	return &unitOfWork{shardManager: sm}
+func NewUnitOfWork(sm *ShardManager, rdb *redis.Client) UnitOfWork {
+	return &unitOfWork{
+		shardManager: sm,
+		redisClient:  rdb,
+	}
 }
 
 func (f *unitOfWork) ExecuteTx(shardingKey string, fn func(Factory) error) error {
 	db := f.shardManager.GetShard(shardingKey)
 	return db.Transaction(func(tx *gorm.DB) error {
-		txFactory := &factory{db: tx}
+		txFactory := &factory{
+			db:          tx,
+			redisClient: f.redisClient,
+		}
 		return fn(txFactory)
 	})
 }
 
-func (f *unitOfWork) URLS(shardingKey string) *URLRepository {
+func (f *unitOfWork) URLS(shardingKey string) URLRepository {
 	db := f.shardManager.GetShard(shardingKey)
-	return NewURLRepository(db)
+	pgRepo := NewPostgresURLRepository(db)
+	return NewCachedURLRepository(pgRepo, f.redisClient)
 }
 
-func (f *factory) URLS(shardingKey string) *URLRepository {
-	return NewURLRepository(f.db)
+func (f *factory) URLS(shardingKey string) URLRepository {
+	pgRepo := NewPostgresURLRepository(f.db)
+	return NewCachedURLRepository(pgRepo, f.redisClient)
 }

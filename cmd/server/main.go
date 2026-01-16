@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/redis/go-redis/v9"
 	"github.com/rodrigocitadin/url-shortener/api"
 	"github.com/rodrigocitadin/url-shortener/api/handlers"
 	"github.com/rodrigocitadin/url-shortener/internal/repository"
@@ -52,7 +53,14 @@ func main() {
 		panic(err)
 	}
 
-	uow := repository.NewUnitOfWork(sm)
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+	if rdb == nil {
+		panic("redis initialization error")
+	}
+
+	uow := repository.NewUnitOfWork(sm, rdb)
 	urlService := services.NewURLService(uow)
 	serviceChain := api.ServiceChain{URLService: urlService}
 

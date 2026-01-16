@@ -5,19 +5,24 @@ import (
 	"gorm.io/gorm"
 )
 
-type URLRepository struct {
+type URLRepository interface {
+	Save(urlEntity *entities.URLEntity) error
+	Find(shortCode string) (*entities.URLEntity, error)
+}
+
+type urlRepository struct {
 	db *gorm.DB
 }
 
-func NewURLRepository(db *gorm.DB) *URLRepository {
-	return &URLRepository{db: db}
+func NewPostgresURLRepository(db *gorm.DB) URLRepository {
+	return &urlRepository{db: db}
 }
 
-func (r *URLRepository) Save(urlEntity *entities.URLEntity) error {
-	return r.db.Create(&urlEntity).Error
+func (c *urlRepository) Save(urlEntity *entities.URLEntity) error {
+	return c.db.Create(&urlEntity).Error
 }
 
-func (r *URLRepository) Find(shortCode string) (*entities.URLEntity, error) {
+func (r *urlRepository) Find(shortCode string) (*entities.URLEntity, error) {
 	var urlEntity entities.URLEntity
 	err := r.db.Find(&urlEntity, "shortcode = ?", shortCode).Error
 	return &urlEntity, err
