@@ -9,3 +9,7 @@ Main goals:
 - [ ] traefik for load balancing
 - [ ] queue for retries
 - [ ] some logger
+
+System Future Design:
+
+![system design](./static/system-design.jpeg)
