@@ -11,6 +11,6 @@ Main goals:
 - [x] dlq
 - [ ] some logger
 
-System Future Design:
+---
 
 ![system design](./static/system-design.png)
