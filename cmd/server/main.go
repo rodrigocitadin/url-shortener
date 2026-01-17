@@ -54,7 +54,7 @@ func main() {
 		panic(err)
 	}
 
-	redisAddr := os.Getenv("REDIS_ADDR")
+	redisAddr := os.Getenv("REDIS_URL")
 	if redisAddr == "" {
 		redisAddr = "localhost:6379"
 	}
@@ -79,6 +79,18 @@ func main() {
 		log.Fatal("Failed to open channel:", err)
 	}
 	defer ch.Close()
+
+	_, err = ch.QueueDeclare(
+		"urls_queue", // name
+		true,         // durable
+		false,        // delete when unused
+		false,        // exclusive
+		false,        // no-wait
+		amqp.Table{"x-dead-letter-exchange": "urls_dlx"},
+	)
+	if err != nil {
+		log.Fatal("Failed to declare queue on startup:", err)
+	}
 
 	uow := repository.NewUnitOfWork(sm, rdb, ch)
 	urlService := services.NewURLService(uow)

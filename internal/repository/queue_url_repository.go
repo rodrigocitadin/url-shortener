@@ -17,19 +17,6 @@ type queueURLRepository struct {
 }
 
 func NewQueueURLRepository(ch *amqp.Channel, fallback URLRepository) URLRepository {
-	_, err := ch.QueueDeclare(
-		"urls_queue",
-		true,  // durable
-		false, // delete when unused
-		false, // exclusive
-		false, // no-wait
-		amqp.Table{"x-dead-letter-exchange": "urls_dlx"},
-	)
-
-	if err != nil {
-		log.Fatal("Error declaring queue", err)
-	}
-
 	return &queueURLRepository{
 		channel:   ch,
 		queueName: "urls_queue",
