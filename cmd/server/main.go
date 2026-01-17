@@ -61,13 +61,24 @@ func main() {
 		panic("redis initialization error")
 	}
 
-	amqpConn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	amqpURL := os.Getenv("RABBITMQ_URL")
+	if amqpURL == "" {
+		amqpURL = "amqp://guest:guest@localhost:5672/"
+	}
+
+	amqpConn, err := amqp.Dial(amqpURL)
 	if err != nil {
 		log.Fatal("RabbitMQ connection error:", err)
 	}
 	defer amqpConn.Close()
 
-	uow := repository.NewUnitOfWork(sm, rdb, amqpConn)
+	ch, err := amqpConn.Channel()
+	if err != nil {
+		log.Fatal("Failed to open channel:", err)
+	}
+	defer ch.Close()
+
+	uow := repository.NewUnitOfWork(sm, rdb, ch)
 	urlService := services.NewURLService(uow)
 	serviceChain := api.ServiceChain{URLService: urlService}
 

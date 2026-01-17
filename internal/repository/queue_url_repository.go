@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -16,14 +17,18 @@ type queueURLRepository struct {
 }
 
 func NewQueueURLRepository(ch *amqp.Channel, fallback URLRepository) URLRepository {
-	_, _ = ch.QueueDeclare(
+	_, err := ch.QueueDeclare(
 		"urls_queue",
 		true,  // durable
 		false, // delete when unused
 		false, // exclusive
 		false, // no-wait
-		nil,   // arguments
+		amqp.Table{"x-dead-letter-exchange": "urls_dlx"},
 	)
+
+	if err != nil {
+		log.Fatal("Error declaring queue", err)
+	}
 
 	return &queueURLRepository{
 		channel:   ch,
@@ -41,16 +46,18 @@ func (r *queueURLRepository) Save(urlEntity *entities.URLEntity) error {
 		return err
 	}
 
-	return r.channel.PublishWithContext(ctx,
-		"",          // exchange
-		r.queueName, // routing key
-		false,       // mandatory
-		false,       // immediate
-		amqp.Publishing{
-			DeliveryMode: amqp.Persistent,
-			ContentType:  "application/json",
-			Body:         body,
-		})
+	err = r.channel.PublishWithContext(ctx, "", r.queueName, false, false, amqp.Publishing{
+		DeliveryMode: amqp.Persistent,
+		ContentType:  "application/json",
+		Body:         body,
+	})
+
+	if err != nil {
+		log.Printf("RabbitMQ error: %v. Using Fallback to DB.", err)
+		return r.fallback.Save(urlEntity)
+	}
+
+	return nil
 }
 
 func (r *queueURLRepository) Find(shortCode string) (*entities.URLEntity, error) {

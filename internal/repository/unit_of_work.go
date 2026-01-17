@@ -18,7 +18,7 @@ type UnitOfWork interface {
 type unitOfWork struct {
 	shardManager *ShardManager
 	redisClient  *redis.Client
-	amqpConn     *amqp.Connection
+	amqpChannel  *amqp.Channel
 }
 
 type factory struct {
@@ -26,11 +26,11 @@ type factory struct {
 	db          *gorm.DB
 }
 
-func NewUnitOfWork(sm *ShardManager, rdb *redis.Client, amqpConn *amqp.Connection) UnitOfWork {
+func NewUnitOfWork(sm *ShardManager, rdb *redis.Client, ch *amqp.Channel) UnitOfWork {
 	return &unitOfWork{
 		shardManager: sm,
 		redisClient:  rdb,
-		amqpConn:     amqpConn,
+		amqpChannel:  ch,
 	}
 }
 
@@ -50,9 +50,9 @@ func (f *unitOfWork) URLS(shardingKey string) URLRepository {
 	pgRepo := NewDatabaseURLRepository(db)
 
 	var finalRepo URLRepository = pgRepo
-	if f.amqpConn != nil {
-		ch, _ := f.amqpConn.Channel()
-		finalRepo = NewQueueURLRepository(ch, pgRepo)
+
+	if f.amqpChannel != nil {
+		finalRepo = NewQueueURLRepository(f.amqpChannel, pgRepo)
 	}
 
 	return NewCachedURLRepository(finalRepo, f.redisClient)
