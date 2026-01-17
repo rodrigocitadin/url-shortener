@@ -7,7 +7,8 @@ Main goals:
 - [ ] k8s managing everything
 - [x] one redis for cache
 - [ ] traefik for load balancing
-- [ ] queue for retries
+- [x] queue for insert
+- [x] dlq
 - [ ] some logger
 
 System Future Design:
