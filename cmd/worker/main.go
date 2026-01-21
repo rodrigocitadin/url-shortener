@@ -200,7 +200,6 @@ func processMessage(d amqp.Delivery, sm *repository.ShardManager, ch *amqp.Chann
 
 	shardIdx := sm.GetShardIndex(entity.Shortcode)
 	shardLabel := "shard-" + strconv.Itoa(shardIdx)
-	statusLabel := "unknown"
 
 	db := sm.GetShard(shardIdx)
 	repo := repository.NewDatabaseURLRepository(db)

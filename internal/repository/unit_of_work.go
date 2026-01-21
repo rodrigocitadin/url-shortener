@@ -35,7 +35,7 @@ func NewUnitOfWork(sm *ShardManager, rdb *redis.Client, ch *amqp.Channel) UnitOf
 }
 
 func (f *unitOfWork) ExecuteTx(shardingKey string, fn func(Factory) error) error {
-	db := f.shardManager.GetShard(shardingKey)
+	db := f.shardManager.GetShard(f.shardManager.GetShardIndex(shardingKey))
 	return db.Transaction(func(tx *gorm.DB) error {
 		txFactory := &factory{
 			db:          tx,
@@ -46,7 +46,7 @@ func (f *unitOfWork) ExecuteTx(shardingKey string, fn func(Factory) error) error
 }
 
 func (f *unitOfWork) URLS(shardingKey string) URLRepository {
-	db := f.shardManager.GetShard(shardingKey)
+	db := f.shardManager.GetShard(f.shardManager.GetShardIndex(shardingKey))
 	pgRepo := NewDatabaseURLRepository(db)
 
 	var finalRepo URLRepository = pgRepo
