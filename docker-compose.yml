@@ -5,6 +5,7 @@ services:
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"
+      - "--metrics.prometheus=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
     ports:
@@ -134,6 +135,51 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: url_shortener_prometheus
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9090:9090"
+    networks:
+      - url_shortener_net
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: url_shortener_loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    networks:
+      - url_shortener_net
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: url_shortener_promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/promtail.yaml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - url_shortener_net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: url_shortener_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - url_shortener_net
 
 volumes:
   pg_shard0_data:
