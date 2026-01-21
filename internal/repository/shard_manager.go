@@ -44,12 +44,14 @@ func NewShardManager(dsns []string) (*ShardManager, error) {
 	return &ShardManager{shards: conns}, nil
 }
 
-func (sm *ShardManager) GetShard(key string) *gorm.DB {
+func (sm *ShardManager) GetShard(idx int) *gorm.DB {
+	return sm.shards[idx]
+}
+
+func (sm *ShardManager) GetShardIndex(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	hashValue := h.Sum32()
 
-	shardIndex := hashValue % uint32(len(sm.shards))
-
-	return sm.shards[shardIndex]
+	return int(hashValue % uint32(len(sm.shards)))
 }

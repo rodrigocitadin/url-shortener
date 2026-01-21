@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"fmt"
+	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -14,12 +16,28 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/rodrigocitadin/url-shortener/internal/entities"
 	"github.com/rodrigocitadin/url-shortener/internal/repository"
 )
 
 var maxRetries = 3
+
+var (
+	jobsProcessed = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "worker_jobs_processed_total",
+		Help: "Total jobs processed by the worker",
+	}, []string{"status", "shard"}) // status: success, error, dlq
+
+	jobDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "worker_job_duration_seconds",
+		Help:    "Time taken to process a job",
+		Buckets: prometheus.DefBuckets, // Adicionado buckets padrão
+	})
+)
 
 func isInfrastructureError(err error) bool {
 	var netErr net.Error
@@ -51,42 +69,49 @@ func getRetryCount(d amqp.Delivery) int {
 	return 0
 }
 
-func setupQueues(ch *amqp.Channel) <-chan amqp.Delivery {
+func setupQueues(ch *amqp.Channel) (<-chan amqp.Delivery, error) {
+	// DLX (Dead Letter Exchange)
 	err := ch.ExchangeDeclare("urls_dlx", "fanout", true, false, false, false, nil)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to declare exchange: %w", err)
 	}
 
+	// DLQ (Dead Letter Queue)
 	qDlq, err := ch.QueueDeclare("urls_dlq", true, false, false, false, nil)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to declare dlq: %w", err)
 	}
 
 	err = ch.QueueBind(qDlq.Name, "", "urls_dlx", false, nil)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to bind dlq: %w", err)
 	}
 
+	// Main queue with DLX
 	args := amqp.Table{"x-dead-letter-exchange": "urls_dlx"}
 	_, err = ch.QueueDeclare("urls_queue", true, false, false, false, args)
 	if err != nil {
-		log.Fatal("Error declaring the main queue:", err)
+		return nil, fmt.Errorf("failed to declare main queue: %w", err)
 	}
 
+	// Backpressure
 	err = ch.Qos(1, 0, false)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to define Qos: %w", err)
 	}
 
 	msgs, err := ch.Consume("urls_queue", "", false, false, false, false, nil)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to consume: %w", err)
 	}
 
-	return msgs
+	return msgs, nil
 }
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
 	maxRetriesEnv := os.Getenv("MAX_RETRIES")
 	if maxRetriesEnv != "" {
 		num, err := strconv.Atoi(maxRetriesEnv)
@@ -97,83 +122,122 @@ func main() {
 
 	dsnsEnv := os.Getenv("SHARD_DSNS")
 	if dsnsEnv == "" {
-		log.Fatal("SHARD_DSNS env not defined")
-	}
-
-	sm, err := repository.NewShardManager(strings.Split(dsnsEnv, ","))
-	if err != nil {
-		log.Fatal(err)
+		slog.Error("Shards env not filled", "error", errors.New("Undefined shards env"))
+		os.Exit(1)
 	}
 
 	amqpURL := os.Getenv("RABBITMQ_URL")
 	if amqpURL == "" {
-		amqpURL = "amqp://guest:guest@localhost:5672/"
+		slog.Error("RabbitMQ env not filled", "error", errors.New("Undefined RABBITMQ_URL env"))
+		os.Exit(1)
+	}
+
+	sm, err := repository.NewShardManager(strings.Split(dsnsEnv, ","))
+	if err != nil {
+		slog.Error("Failed to connect to Shards", "error", err)
+		os.Exit(1)
 	}
 
 	conn, err := amqp.Dial(amqpURL)
 	if err != nil {
-		log.Fatal("Failed to connect to RabbitMQ:", err)
+		slog.Error("Failed to connect to RabbitMQ", "error", err)
+		os.Exit(1)
 	}
 	defer conn.Close()
 
 	ch, err := conn.Channel()
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("Failed to create amqp channel", "error", err)
+		os.Exit(1)
 	}
 	defer ch.Close()
 
-	msgs := setupQueues(ch)
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		slog.Info("Metrics server listening", "port", 2112)
+		if err := http.ListenAndServe(":2112", nil); err != nil {
+			slog.Error("Metrics server failed", "error", err)
+		}
+	}()
 
-	log.Printf("Worker started, MaxRetries=%d. Waiting for messages...", maxRetries)
+	msgs, err := setupQueues(ch)
+	if err != nil {
+		slog.Error("Failed to setup amqp queues", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("Worker started. Waiting for messages...", "max_retries", maxRetries)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	forever := make(chan bool)
 
 	go func() {
 		for d := range msgs {
 			go processMessage(d, sm, ch)
 		}
+		forever <- true
 	}()
 
 	<-stop
-	log.Println("Worker shutting down...")
+	slog.Info("Worker shutting down...")
 }
 
 func processMessage(d amqp.Delivery, sm *repository.ShardManager, ch *amqp.Channel) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		jobDuration.Observe(duration)
+	}()
+
 	var entity entities.URLEntity
 	if err := json.Unmarshal(d.Body, &entity); err != nil {
-		log.Printf("Error decoding JSON: %v. Sending to DLQ.", err)
+		slog.Error("Error decoding JSON: Sending to DLQ.", "error", err)
 		d.Nack(false, false)
 		return
 	}
 
-	db := sm.GetShard(entity.Shortcode)
+	shardIdx := sm.GetShardIndex(entity.Shortcode)
+	shardLabel := "shard-" + strconv.Itoa(shardIdx)
+	statusLabel := "unknown"
+
+	db := sm.GetShard(shardIdx)
 	repo := repository.NewDatabaseURLRepository(db)
 
-	log.Printf("Processing shortcode: %s", entity.Shortcode)
+	slog.Info("Processing shortcode", "shortcode", entity.Shortcode, "shard", shardLabel)
 
 	err := repo.Save(&entity)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			log.Printf("Duplicated key (%s). Ack.", entity.Shortcode)
+			slog.Error("Duplicated key detected", "shortcode", entity.Shortcode)
 			d.Ack(false)
+			jobsProcessed.WithLabelValues("success", shardLabel).Inc()
 			return
 		}
 
 		currentRetries := getRetryCount(d)
 		if currentRetries >= maxRetries {
-			log.Printf("Max Retries (%d) was reached for %s. Sending it to the DLQ.", maxRetries, entity.Shortcode)
+			slog.Warn(
+				"Max Retries was reachedl. Sending it to the DLQ",
+				"shortcode", entity.Shortcode, "retries", currentRetries)
 			d.Nack(false, false)
+			jobsProcessed.WithLabelValues("dlq", shardLabel).Inc()
 			return
 		}
 
-		log.Printf("Error (%s): %v. Attempt %d/%d.", entity.Shortcode, err, currentRetries+1, maxRetries)
+		slog.Error(
+			"Error with message",
+			"shortcode", entity.Shortcode,
+			"error", err,
+			"retries", currentRetries+1,
+			"shard", shardLabel,
+		)
 
 		if isInfrastructureError(err) {
-			log.Printf("CRITICAL DB ERROR: %v. Database seems down.", err)
-			log.Println("Worker sleeping for 5s to avoid overload...")
-			time.Sleep(10 * time.Second)
+			slog.Error("Critical Infrastructure Error. Sleeping to avoid overload", "error", err)
+			time.Sleep(5 * time.Second)
 			d.Nack(false, true)
 			return
 		}
@@ -201,14 +265,16 @@ func processMessage(d amqp.Delivery, sm *repository.ShardManager, ch *amqp.Chann
 		)
 
 		if errPub != nil {
-			log.Printf("Error retrying: %v. Giving Nack(true) as a replacement", errPub)
 			d.Nack(false, true) // Fallback
+			slog.Error("Error to republish retry: Giving Nack(true) as fallback", "error", errPub)
 		} else {
 			d.Ack(false)
 		}
 
+		jobsProcessed.WithLabelValues("retry", shardLabel).Inc()
 	} else {
-		log.Printf("Success processing: %s", entity.Shortcode)
 		d.Ack(false)
+		slog.Info("Successfully processed", "shortcode", entity.Shortcode, "shard", shardLabel)
+		jobsProcessed.WithLabelValues("success", shardLabel).Inc()
 	}
 }
